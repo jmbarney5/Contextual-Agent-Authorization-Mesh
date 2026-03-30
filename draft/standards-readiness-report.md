@@ -109,28 +109,28 @@ When the Policy Inference Plane receives an authorization request, it uses these
 A recurring challenge in the Moltbook post-mortem was "Context Egress" — the ability of an agent to maintain its security posture when communicating across boundaries that do not share the same service mesh or protocol awareness.<sup>8</sup> Consider the scenario where a Human (U1) is in an active authenticated session with another user (U2). During this session, an Agent (A1) acting for U1 needs to call an external API that is not part of the internal Model Context Protocol (MCP) environment.
 
 
-### Nested JWTs and Chained JWS for Intent Propagation
+### Context Egress and Multi-Hop Proof of Intent (The PACT Architecture)
 
-Rather than relying on a proprietary token format or hardware-locked credential chains, CAAM uses standard **Nested JWTs** and **Chained JSON Web Signatures (JWS)** (RFC 7515, RFC 7519) to propagate intent across delegation hops. Each agent in the chain signs the intent with its own workload-bound key (the SPIFFE SVID private key managed by SPIRE), creating a verifiable chain of custody that any standard JWT library can validate.
+A recurring challenge in the Moltbook post-mortem was "Context Egress" — the ability of an agent to maintain its security posture when communicating across boundaries that do not share the same service mesh or protocol awareness.<sup>8</sup> Consider the scenario where a Human (U1) is in an active authenticated session with another user (U2). During this session, an Agent (A1) acting for U1 needs to call an external API that is not part of the internal Model Context Protocol (MCP) environment, or delegate a sub-task to Agent A2.
 
-The "Contextual Zookie" — a cryptographically signed bundle of session metadata — is encoded as the innermost JWT in the nested structure. It functions similarly to a Google Zanzibar "Zookie," providing causal consistency, but is enriched with real-time risk and relationship data. When the Zookie must cross a mesh boundary, the nesting structure ensures the original intent remains verifiable.
+Traditional nested token models (like standard WIMSE) are vulnerable to "unwrapping" attacks, where a malicious downstream agent strips the outer layers to remove an intermediary's constraints. They also struggle with cross-organizational federation, demanding that interacting agents explicitly identify each other's "audience". 
+
+To solve this, CAAM integrates the **Provenance-Attenuated Chain Token (PACT)** architecture. 
 
 The multi-hop egress flow operates as follows:
 
-1. **Origination (Human -> Agent A1)**: The IdP's Policy Inference Plane verifies the active session between U1 and U2 and generates a Contextual Zookie JWT (`JWT_0`) that binds A1's authority to this specific interaction context. `JWT_0` contains the `purpose`, `scope_ceiling`, and `max_hops` claims, signed by the IdP's KMS-managed key.
+1. **The Genesis Block (Origination):** The IdP's Policy Inference Plane verifies the active session between U1 and U2 and generates a Session Context Object (SCO) as the Genesis Block. This block binds A1's authority to this specific interaction context. Crucially, the IdP embeds an ephemeral Public Key (`PK_1`) within this block and signs it with its KMS-managed key. The User passes Block 0 and the corresponding ephemeral Private Key (`SK_1`) to Agent A1.
+2. **The Ephemeral Handover (Delegation):** When A1 delegates a sub-task to A2, it attenuates the intent (e.g., from "Read/Write" to "Read Only"). A1 generates a new ephemeral keypair (`PK_2`, `SK_2`). A1 creates Block 1 (containing only the delta/attenuation and `PK_2`). A1 signs Block 1 using `SK_1`, then passes the token and `SK_2` forward.
+3. **Intersection of Permissions:** An agent can only down-scope a token; it can never up-scope it. The final execution context is the strict mathematical intersection of all constraints applied in the chain.
+4. **Token Sealing (Boundary Crossing):** When the final agent prepares to call the target API, it creates a final block with no new public key, signaling the end of the chain, and applies its signature. It is now a sealed bearer token. 
 
-2. **Delegation (Agent A1 -> Agent A2)**: When A1 delegates a sub-task to A2, A1's CAAM sidecar wraps `JWT_0` inside a new JWT (`JWT_1`). `JWT_1` adds an `act` (actor) claim identifying A1, a `sub_purpose` claim narrowing the task scope, and decrements the `max_hops` counter. `JWT_1` is signed by A1's SPIFFE SVID key, creating a Chained JWS: `JWS(A1, JWT_0)`.
+This architecture significantly **decreases infrastructure complexity**. Only the root IdP is required to maintain heavy Public Key Infrastructure (PKI). Because intermediaries generate keys ephemerally, they do not need to be mutually identified across organizational boundaries, solving cross-boundary federation naturally without requiring identity agents (like SPIRE) on every node.
 
-3. **Verification at Each Hop**: Before synthesizing a JIT Scoped Token for any tool call, the receiving sidecar unwraps the entire JWT chain. It verifies:
-   - Each signature in the chain against the signer's SPIFFE SVID (validated via the SPIRE trust bundle).
-   - The `sub_purpose` at the current hop is a semantic subset of the `purpose` at the preceding hop.
-   - The `scope_ceiling` has not been exceeded after Scope Attenuation.
-   - The `max_hops` counter is non-negative.
-   - The current CRS score permits the requested action.
-
-4. **Boundary Crossing (to non-mesh-aware APIs)**: For external APIs that cannot parse nested JWTs, the CAAM "Contextual Gateway" flattens the chain into a standard OAuth 2.0 Access Token. The flattened JWT retains the `act` claim (identifying the final agent), a `ctx` claim (containing a hash of the full Zookie chain for audit), and standard OAuth scopes. The IdP's presence as the issuer ensures the token was only minted because the full chain verification succeeded.
-
-This mechanism prevents the "Moltbook scenario" where an agent uses a long-lived, static API key that has no connection to the current human session.<sup>10</sup> If the session between U1 and U2 terminates, the IdP revokes the Zookie, and any subsequent attempts to use tokens derived from that chain will fail during introspection. Critically, the entire chain is built from standard JWTs and JWS — no proprietary token formats or custom hardware is required.
+**Happy Security Accidents:**
+The ephemeral key architecture of PACT produces several "happy security accidents":
+- **End-to-end encrypted responses:** The original user's ephemeral private key can be used to encrypt the return path, meaning intermediary agents cannot see the response data.
+- **Fire-and-forget with reporting:** It enables asynchronous flows where the sealed token and result are reported back to a central collector for audit, without requiring synchronous connections.
+- **Native DPoP:** The ephemeral key naturally serves as the DPoP (Demonstrating Proof-of-Possession) key for sender-constraining the HTTP request at the final API call, preventing token replay attacks.
 
 
 ## The 'Inference' Latency: Zanzibar vs. The Reasoner
@@ -242,7 +242,7 @@ The transition from the Moltbook-era security failures to a CAAM-driven identity
 
 1. **Executable Identity Requirement**: The 88:1 agent-to-human ratio necessitates a move to automated, graph-based provisioning via Agentic SCIM. The LinkedObject attribute is the primary mechanism for establishing the trust scaffolding required for the Policy Inference Plane.
 2. **Software-Defined Assurance is Sufficient**: The Moltbook breach would have been neutralized by SPIFFE-issued workload identities and KMS-backed Ghost Tokens — technologies available in every major cloud provider today. Custom hardware (TEEs, specialized microcontrollers) provides defense-in-depth but is not a prerequisite for deployment.
-3. **Contextual Binding via Standard JWTs**: The ability to propagate Contextual Zookies across non-mesh boundaries via Nested JWTs and Chained JWS is essential for preventing lateral movement in multi-agent flows.<sup>9</sup> No proprietary token formats are required.
+3. **Contextual Binding via Standard Tokens**: The ability to propagate Contextual Zookies across non-mesh boundaries via the PACT architecture is essential for preventing lateral movement in multi-agent flows.<sup>9</sup> By using ephemeral keys, we avoid complex federated PKI systems while natively achieving "unwrapping" protection and DPoP.
 4. **Latency vs. Security Trade-off**: A hybrid model — using pre-computed Zanzibar tuples for routine actions and JIT IDQL generation for high-risk anomalies — is the only path to sub-50ms latency at the 10-million-triple scale.<sup>12</sup> OPA/Cedar policies evaluated by an Envoy `ext_authz` filter add < 5ms per request for pre-computed checks.
 5. **IPSIE Integration**: The broadcast of "Fuzzing" and other entity risk signals is the only way to achieve "collective immunity" in a geographically distributed agent ecosystem.<sup>2</sup> CAAM provides the necessary high-fidelity data to fuel these IPSIE signals.
 
@@ -255,7 +255,7 @@ CAAM is designed as a **Governance Layer** that deploys on existing infrastructu
 |-------|----------|-------------|----------------|
 | **Phase 1: Identity Foundation** | Months 1–2 | SPIFFE/SPIRE deployment for workload identity; OIDC Federation for cross-boundary token exchange; Cloud KMS integration for Ghost Token signing. | Kubernetes (any distribution), or Serverless (AWS Lambda + IAM Roles Anywhere). |
 | **Phase 2: Policy Mesh** | Months 2–4 | Envoy sidecar deployment with `ext_authz` filter; OPA/Cedar policy bundle for CRS, Scope Attenuation, and Intent-Signature verification; mTLS enforcement across agent workloads. | Standard service mesh (Istio/Envoy) or middleware integration (LangChain/AutoGPT). |
-| **Phase 3: Graph and Inference** | Months 3–5 | Knowledge Graph seeded via Agentic SCIM LinkedObject; Hybrid Zanzibar/JIT reasoning with SPARQL caching; Nested JWT chain for multi-hop intent propagation. | Graph database (Neo4j, Amazon Neptune, or Apache Jena) with LSM-backed storage. |
+| **Phase 3: Graph and Inference** | Months 3–5 | Knowledge Graph seeded via Agentic SCIM LinkedObject; Hybrid Zanzibar/JIT reasoning with SPARQL caching; PACT deployment for multi-hop intent propagation. | Graph database (Neo4j, Amazon Neptune, or Apache Jena) with LSM-backed storage. |
 | **Phase 4: Signal Integration** | Months 4–6 | IPSIE/SSF signal receiver and broadcaster; CAEP event consumption for session-level risk; Contextual Gateway for legacy OAuth 2.0 shim layer. | OpenID SSF endpoint; OAuth 2.0 introspection endpoint. |
 
 ### Technology Stack
