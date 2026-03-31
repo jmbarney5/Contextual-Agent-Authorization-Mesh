@@ -1482,17 +1482,17 @@ defined by I-D.pioli-agent-discovery:
 Let X be the agent's internal state, S_1 and S_2
 be two data sources, and B be the inference
 boundary defined by policy.  The sidecar ensures
-that for any inference I drawn by the agent:
+that for any conclusion C drawn by the agent:
 
 ~~~
-  P(I | S_1, S_2, X) = P(I | Auth(S_1, S_2), X)
+  P(C | S_1, S_2, X) = P(C | Auth(S_1, S_2), X)
 ~~~
 
 Where the Auth function represents the set of
-permissible inferences under boundary B.  If the
+permissible conclusions under boundary B.  If the
 combination is unauthorized, the sidecar applies
 a privacy-preserving transformation T such that
-the mutual information within the scratchpad is
+the mutual information I within the scratchpad is
 minimized:
 
 ~~~
