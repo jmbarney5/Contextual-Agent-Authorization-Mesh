@@ -95,6 +95,15 @@ informative:
   RFC6749:
   RFC8126:
   RFC9635:
+  I-D.barney-caam-crs:
+    title: "Contextual Risk Scoring for Agentic Authorization"
+    author:
+      - ins: J. M. Barney
+        name: Jonathan M. Barney
+      - ins: Y. Porla
+        name: Yogi Porla
+    date: 2026
+    target: https://datatracker.ietf.org/doc/draft-barney-caam-crs/
   I-D.usama-seat-intra-vs-post:
     title: "Pre-, Intra- and Post-handshake Attestation"
     author:
@@ -654,7 +663,10 @@ The "ctx" claim MUST contain the following members:
    used to validate the signature of the subsequent block.
 
 *  "crs": The current Contextual Risk Score, a
-   decimal value in the range \[0, 1\].
+   decimal value in the range \[0, 1\], computed
+   according to the scoring model adopted by the
+   deployment (see I-D.barney-caam-crs for the
+   default model).
 
 The SCO MUST be signed by the originating Identity
 Provider at creation.
@@ -850,40 +862,21 @@ The CAAM protocol proceeds through four phases:
 ## Contextual Risk Scoring (CRS) {#contextual-risk-scoring}
 
 Every request within the mesh MUST be assigned a
-Contextual Risk Score (CRS), S in the range
-\[0, 1\], calculated by the Verifier (or by the
-sidecar when no dedicated Verifier is deployed).
+Contextual Risk Score (CRS), a real-valued score
+S in the range \[0, 1\].  The CRS determines
+the remediation tier applied to each tool call:
+autonomous execution, step-up authentication, or
+human-in-the-loop approval.
 
-~~~
-  S = w_1 * P + w_2 * E + w_3 * D
-~~~
-
-Where P is Provenance, E is EnvTrust, D is
-DataSensitivity, w_1 + w_2 + w_3 = 1, and weights
-are configurable per deployment.  The factors are:
-
-*  Provenance: The strength and freshness of the
-   identity chain, hop count from the original
-   user, PACT cryptographic integrity, and SCO integrity.
-*  EnvTrust: Trustworthiness of the execution
-   environment per RATS Attestation Evidence --
-   TPM status, manifest integrity, geographic
-   compliance.  When RATS Evidence is not
-   available (Minimum Viable deployments), E
-   SHOULD default to 0.5 (neutral).  Deployments
-   MAY configure a higher default to reflect
-   elevated risk for unattested environments.
-*  DataSensitivity: Classification of the target
-   resource (public, internal, confidential,
-   regulated PII).
-
-Remediation Tiers:
-
-| CRS Range | Level | Action |
-|-|-|-|
-| S < 0.3 | Nominal | Sealed PACT execution |
-| 0.3 <= S < 0.7 | Elevated | Step-Up (MFA) REQUIRED |
-| S >= 0.7 | Critical | HITL REQUIRED |
+The computation model for the CRS -- including
+scoring factors, weight configuration, and
+remediation tier definitions -- is specified in
+the companion document
+I-D.barney-caam-crs.  Deployments MAY adopt the
+scoring model defined therein or substitute an
+alternative model, provided it produces a score
+in the range \[0, 1\] and maps to the
+remediation tiers specified in that document.
 
 The CRS MUST be recalculated on every tool call.
 A spike in CRS mid-session (e.g., from an SSF risk
@@ -1371,7 +1364,9 @@ with the following members:
    reference to the Verifier's Attestation
    Result per RFC9334.
 *  "crs" (number, REQUIRED): Contextual Risk
-   Score in the range \[0, 1\].
+   Score in the range \[0, 1\], computed per
+   I-D.barney-caam-crs or an alternative
+   deployment-specific model.
 
 The following is a non-normative example of the
 "ctx" claim value:
@@ -1508,6 +1503,15 @@ The authors thank the IETF community and the
 contributors to the Agent Registration and
 Discovery Protocol for foundational work that
 informed this specification.
+
+The separation of Contextual Risk Scoring into a
+companion specification (I-D.barney-caam-crs) was
+motivated by review feedback from Yogi Porla
+(Google), who identified that embedding
+deployment-specific scoring weights into the core
+CAAM architecture would add an opinionated
+approach that could hinder adoption across diverse
+deployment environments.
 
 # Document History
 
