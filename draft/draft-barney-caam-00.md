@@ -94,6 +94,7 @@ normative:
 informative:
   RFC6749:
   RFC8126:
+  RFC9396:
   RFC9635:
   I-D.barney-caam-crs:
     title: "Contextual Risk Scoring for Agentic Authorization"
@@ -228,6 +229,21 @@ authorization decision tailored to autonomous agent
 ecosystems.
 
 CAAM occupies three complementary roles:
+
+*  OAuth 2.0 Rich Authorization Requests (RAR):
+   RFC 9396 RFC9396 defines a mechanism for clients to
+   request fine-grained authorization data using
+   structured JSON. RAR is the RECOMMENDED standard
+   for capturing the complex intent of a human user
+   during the initial authorization flow. However, RAR
+   is a single-hop protocol; it does not natively
+   define how that JSON intent is propagated,
+   attenuated, or secured across multi-hop agent
+   delegation chains. CAAM bridges this gap by
+   taking the RAR-negotiated intent and embedding
+   it into the Session Context Object (SCO) as the
+   Genesis Block of the PACT chain, ensuring the
+   rich intent survives across all subsequent hops.
 
 *  GNAP Extension for Non-Deterministic Clients:
    The Grant Negotiation and Authorization Protocol
